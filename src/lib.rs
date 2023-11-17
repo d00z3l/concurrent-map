@@ -770,6 +770,35 @@ where
         leaf.get(key)
     }
 
+    /// Atomically get a value out of the map that is associated with this key.
+    ///
+    /// # Examples
+    /// ```
+    /// let map = concurrent_map::ConcurrentMap::<usize, usize>::default();
+    ///
+    /// map.insert(1, 1);
+    ///
+    /// let actual = map.fetch(&0, |x|x.clone());
+    /// let expected = None;
+    /// assert_eq!(expected, actual);
+    ///
+    /// let actual = map.fetch(&1, |x|x.clone());
+    /// let expected = Some(1);
+    /// assert_eq!(expected, actual);
+    /// ```
+    pub fn fetch<Q, F, R>(&self, key: &Q, f: F) -> Option<R>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        F: FnOnce(&V) -> R
+    {
+        let mut guard = self.ebr.pin();
+
+        let leaf = self.inner.leaf_for_key(LeafSearch::Eq(key), &mut guard);
+
+        leaf.fetch(key, f)
+    }
+
     /// Returns `true` if the `ConcurrentMap` contains the specified key.
     ///
     /// # Examples
@@ -2413,6 +2442,19 @@ where
         })
     }
 
+    fn fetch<Q, F, R>(&self, key: &Q, f: F) -> Option<R>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        F: FnOnce(&V) -> R
+    {
+        assert!(!self.is_merging);
+        assert!(self.merging_child.is_none());
+        assert!(self.is_leaf());
+
+        self.leaf().get(key).map(|x|f(x))
+    }
+
     fn get<Q>(&self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -2625,6 +2667,7 @@ fn basic_map() {
         assert_eq!(map.get(&i), None);
         map.insert(i, i);
         assert_eq!(map.get(&i), Some(i), "failed to get key {i}");
+        assert_eq!(map.fetch(&i, |x|x.clone()), Some(i), "failed to get key {i}");
     }
 
     for (i, (k, _v)) in map.range(..).enumerate() {
