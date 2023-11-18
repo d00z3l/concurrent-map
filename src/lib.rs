@@ -1697,6 +1697,96 @@ where
 
         self.fetch_and_update(key, f)
     }
+
+    /// Iterate over the map fetching a reference to each key/value.
+    ///
+    /// This is not an atomic snapshot, and it caches B+tree leaf
+    /// nodes as it iterates through them to achieve high throughput.
+    /// As a result, the following behaviors are possible:
+    ///
+    /// * may (or may not!) return values that were concurrently added to the map after the
+    ///   iterator was created
+    /// * may (or may not!) return items that were concurrently deleted from the map after
+    ///   the iterator was created
+    /// * If a key's value is changed from one value to another one after this iterator
+    ///   is created, this iterator might return the old or the new value.
+    ///
+    /// But, you can be certain that any key that existed prior to the creation of this
+    /// iterator, and was not changed during iteration, will be observed as expected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use concurrent_map::ConcurrentMap;
+    ///
+    /// let data = vec![
+    ///     ("key 1", 1),
+    ///     ("key 2", 2),
+    ///     ("key 3", 3)
+    /// ];
+    ///
+    /// let map: ConcurrentMap<&'static str, usize> = data.iter().copied().collect();
+    ///
+    /// let mut r = Vec::new();
+    /// map.fetch_all(|k, v|{
+    ///     r.push((k.clone(), *v));
+    /// });
+    ///
+    /// assert_eq!(&data, &r);
+    /// ```
+    pub fn fetch_all<F>(&self, mut f: F) where F: FnMut(&K, &V) {
+
+        let mut guard = self.ebr.pin();
+        let mut current = self.inner.leaf_for_key(LeafSearch::Eq(&K::MIN), &mut guard);
+        let mut next_index = 0;
+
+        loop {
+            if let Some((k, v)) = current.leaf().get_index(next_index) {
+                // iterate over current cached b+ tree leaf node
+                next_index += 1;
+                f(k, v);
+            } else if let Some(next_ptr) = current.next {
+                if let Some(next_current) = next_ptr.node_view(&mut guard) {
+                    // we were able to take the fast path by following the sibling pointer
+
+                    // it's possible that nodes were merged etc... so we need to make sure
+                    // that we make forward progress
+                    next_index = next_current
+                        .leaf()
+                        .iter()
+                        .position(|(k, _v)| k >= current.hi.as_ref().unwrap())
+                        .unwrap_or(0);
+
+                    current = next_current;
+                } else if let Some(ref hi) = current.hi {
+                    // we have to take the slow path by traversing the
+                    // map due to a concurrent merge that deleted the
+                    // right sibling. we are protected from a use after
+                    // free of the ID itself due to holding an ebr Guard
+                    // on the Iter struct, holding a barrier against re-use.
+                    let next_current = self
+                        .inner
+                        .leaf_for_key(LeafSearch::Eq(hi.borrow()), &mut guard);
+
+                    // it's possible that nodes were merged etc... so we need to make sure
+                    // that we make forward progress
+                    next_index = next_current
+                        .leaf()
+                        .iter()
+                        .position(|(k, _v)| k >= hi)
+                        .unwrap_or(0);
+                    current = next_current;
+                } else {
+                    panic!("somehow hit a node that has a next but not a hi key");
+                }
+            } else {
+                // end of the collection
+                return;
+            }
+        }
+
+    }
+
 }
 
 /// An iterator over a [`ConcurrentMap`]. Note that this is
@@ -2713,6 +2803,13 @@ fn basic_map() {
     for i in 0..=n {
         assert_eq!(map.get(&i), Some(i), "failed to get key {i}");
     }
+
+    let mut i = 0;
+    map.fetch_all(|k, _|{
+        assert_eq!(i, *k);
+        i += 1;
+    });
+
 }
 
 #[test]
