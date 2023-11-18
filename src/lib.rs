@@ -1612,93 +1612,8 @@ where
             }
         }
     }
-}
 
-// This impl block is for `fetch_max` and `fetch_min` operations on
-// values that implement `Ord`.
-impl<K, V, const FANOUT: usize, const LOCAL_GC_BUFFER_SIZE: usize>
-    ConcurrentMap<K, V, FANOUT, LOCAL_GC_BUFFER_SIZE>
-where
-    K: 'static + Clone + Minimum + Ord + Send + Sync,
-    V: 'static + Clone + Send + Sync + Ord,
-{
-    /// Similar to [`std::sync::atomic::AtomicU64::fetch_min`] in spirit, this
-    /// atomically sets the value to the minimum of the
-    /// previous value and the provided value.
-    ///
-    /// The previous value is returned. None is returned if
-    /// there was no previous value, in which case the
-    /// value is set to the provided value. The value is
-    /// unchanged if the current value is already lower
-    /// than the provided value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let map = concurrent_map::ConcurrentMap::<&'static str, usize>::default();
-    ///
-    /// // acts as an insertion if no value is present
-    /// assert_eq!(map.fetch_min("key 1", 5), None);
-    ///
-    /// // sets the value to the new lower value, returns the old value
-    /// assert_eq!(map.fetch_min("key 1", 2), Some(5));
-    ///
-    /// // fails to set the value to a lower number, returns the
-    /// // current value.
-    /// assert_eq!(map.fetch_min("key 1", 10), Some(2));
-    ///
-    /// ```
-    pub fn fetch_min(&self, key: K, value: V) -> Option<V> {
-        let f = move |prev_opt: Option<&V>| {
-            if let Some(prev) = prev_opt {
-                Some(prev.min(&value).clone())
-            } else {
-                Some(value.clone())
-            }
-        };
-
-        self.fetch_and_update(key, f)
-    }
-
-    /// Similar to [`std::sync::atomic::AtomicU64::fetch_max`] in spirit, this
-    /// atomically sets the value to the maximum of the
-    /// previous value and the provided value.
-    ///
-    /// The previous value is returned. None is returned if
-    /// there was no previous value, in which case the
-    /// value is set to the provided value. The value is
-    /// unchanged if the current value is already higher
-    /// than the provided value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let map = concurrent_map::ConcurrentMap::<&'static str, usize>::default();
-    ///
-    /// // acts as an insertion if no value is present
-    /// assert_eq!(map.fetch_max("key 1", 5), None);
-    ///
-    /// // sets the value to the new higher value, returns the old value
-    /// assert_eq!(map.fetch_max("key 1", 10), Some(5));
-    ///
-    /// // fails to set the value to a higher number, returns the
-    /// // current value.
-    /// assert_eq!(map.fetch_max("key 1", 2), Some(10));
-    ///
-    /// ```
-    pub fn fetch_max(&self, key: K, value: V) -> Option<V> {
-        let f = move |prev_opt: Option<&V>| {
-            if let Some(prev) = prev_opt {
-                Some(prev.max(&value).clone())
-            } else {
-                Some(value.clone())
-            }
-        };
-
-        self.fetch_and_update(key, f)
-    }
-
-    /// Iterate over the map fetching a reference to each key/value.
+        /// Iterate over the map fetching a reference to each key/value.
     ///
     /// This is not an atomic snapshot, and it caches B+tree leaf
     /// nodes as it iterates through them to achieve high throughput.
@@ -1785,6 +1700,92 @@ where
             }
         }
 
+    }
+    
+}
+
+// This impl block is for `fetch_max` and `fetch_min` operations on
+// values that implement `Ord`.
+impl<K, V, const FANOUT: usize, const LOCAL_GC_BUFFER_SIZE: usize>
+    ConcurrentMap<K, V, FANOUT, LOCAL_GC_BUFFER_SIZE>
+where
+    K: 'static + Clone + Minimum + Ord + Send + Sync,
+    V: 'static + Clone + Send + Sync + Ord,
+{
+    /// Similar to [`std::sync::atomic::AtomicU64::fetch_min`] in spirit, this
+    /// atomically sets the value to the minimum of the
+    /// previous value and the provided value.
+    ///
+    /// The previous value is returned. None is returned if
+    /// there was no previous value, in which case the
+    /// value is set to the provided value. The value is
+    /// unchanged if the current value is already lower
+    /// than the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let map = concurrent_map::ConcurrentMap::<&'static str, usize>::default();
+    ///
+    /// // acts as an insertion if no value is present
+    /// assert_eq!(map.fetch_min("key 1", 5), None);
+    ///
+    /// // sets the value to the new lower value, returns the old value
+    /// assert_eq!(map.fetch_min("key 1", 2), Some(5));
+    ///
+    /// // fails to set the value to a lower number, returns the
+    /// // current value.
+    /// assert_eq!(map.fetch_min("key 1", 10), Some(2));
+    ///
+    /// ```
+    pub fn fetch_min(&self, key: K, value: V) -> Option<V> {
+        let f = move |prev_opt: Option<&V>| {
+            if let Some(prev) = prev_opt {
+                Some(prev.min(&value).clone())
+            } else {
+                Some(value.clone())
+            }
+        };
+
+        self.fetch_and_update(key, f)
+    }
+
+    /// Similar to [`std::sync::atomic::AtomicU64::fetch_max`] in spirit, this
+    /// atomically sets the value to the maximum of the
+    /// previous value and the provided value.
+    ///
+    /// The previous value is returned. None is returned if
+    /// there was no previous value, in which case the
+    /// value is set to the provided value. The value is
+    /// unchanged if the current value is already higher
+    /// than the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let map = concurrent_map::ConcurrentMap::<&'static str, usize>::default();
+    ///
+    /// // acts as an insertion if no value is present
+    /// assert_eq!(map.fetch_max("key 1", 5), None);
+    ///
+    /// // sets the value to the new higher value, returns the old value
+    /// assert_eq!(map.fetch_max("key 1", 10), Some(5));
+    ///
+    /// // fails to set the value to a higher number, returns the
+    /// // current value.
+    /// assert_eq!(map.fetch_max("key 1", 2), Some(10));
+    ///
+    /// ```
+    pub fn fetch_max(&self, key: K, value: V) -> Option<V> {
+        let f = move |prev_opt: Option<&V>| {
+            if let Some(prev) = prev_opt {
+                Some(prev.max(&value).clone())
+            } else {
+                Some(value.clone())
+            }
+        };
+
+        self.fetch_and_update(key, f)
     }
 
 }
